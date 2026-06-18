@@ -1,0 +1,5 @@
+*.engine
+*.onnx
+__pycache__/
+*.pyc
+hf_cache/
