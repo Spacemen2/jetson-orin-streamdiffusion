@@ -5,17 +5,13 @@ import onnx
 import subprocess
 from diffusers import UNet2DConditionModel
 
-# —— Verify the ONNX model after export
-model = onnx.load(onnx_path)
-onnx.checker.check_model(model)
-
 # ── Config: set OUT_DIR to your local path ──────────────
 MODEL_ID = "stabilityai/sd-turbo"
 OUT_DIR = r"C:\sd_export\onnx"      # ← Windows path, use r"..." raw string
 
 SAMPLE_BATCH = 2
-LATENT_H = 48      # 384 // 8
-LATENT_W = 48      # 384 // 8
+LATENT_H = 64      # 512 // 8
+LATENT_W = 64      # 512 // 8
 EMBED_DIM = 1024   # SD-Turbo
 MAX_TOKENS = 77
 # ──────────────────────────────────────────────
@@ -41,14 +37,16 @@ class UNetWrapper(torch.nn.Module):
 
 wrapper = UNetWrapper(unet).to(device).eval()
 
-# Dummy inputs: sample/enc in fp16 to match the model; timestep in fp32 (cast internally)
+# Dummy inputs: scale fp16 tensors down to avoid NaN during trace; timestep uses realistic integer-like values
 dummy = (
-    torch.randn(SAMPLE_BATCH, 4, LATENT_H, LATENT_W, device=device, dtype=dtype),
-    torch.randn(SAMPLE_BATCH, device=device, dtype=torch.float32),
-    torch.randn(SAMPLE_BATCH, MAX_TOKENS, EMBED_DIM, device=device, dtype=dtype),
+    torch.randn(SAMPLE_BATCH, 4, LATENT_H, LATENT_W, device=device, dtype=dtype) * 0.1,
+    torch.tensor([999.0, 999.0], device=device, dtype=torch.float32),
+    torch.randn(SAMPLE_BATCH, MAX_TOKENS, EMBED_DIM, device=device, dtype=dtype) * 0.1,
 )
 
 onnx_path = os.path.join(OUT_DIR, "unet.onnx")
+opt_path = os.path.join(OUT_DIR, "unet.opt.onnx")
+
 print("[export] ->", onnx_path)
 with torch.no_grad():
     torch.onnx.export(
@@ -64,6 +62,21 @@ with torch.no_grad():
         opset_version=17,
         do_constant_folding=True,
     )
+    
+# —— Verify the ONNX model after export
+model = onnx.load(onnx_path)
+onnx.checker.check_model(model)
+
+subprocess.run(
+    ["polygraphy", "surgeon", "sanitize", onnx_path,
+     "--fold-constants", "-o", opt_path],
+    check=True,
+)
+
+opt_model = onnx.load(opt_path)
+onnx.checker.check_model(opt_model)
+
 print("[ok] exported:", onnx_path)
 print("[ok] ONNX validation passed")
+print("[ok] optimized & validated:", opt_path)
 print("\nNext: copy unet.onnx to engines/onnx/ on the Jetson,")
