@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 import os
 import torch
+import onnx
+import subprocess
 from diffusers import UNet2DConditionModel
+
+# —— Verify the ONNX model after export
+model = onnx.load(onnx_path)
+onnx.checker.check_model(model)
 
 # ── Config: set OUT_DIR to your local path ──────────────
 MODEL_ID = "stabilityai/sd-turbo"
@@ -50,13 +56,14 @@ with torch.no_grad():
         input_names=["sample", "timestep", "encoder_hidden_states"],
         output_names=["latent"],
         dynamic_axes={
-            "sample":                {0: "2B", 2: "H", 3: "W"},
-            "timestep":              {0: "2B"},
-            "encoder_hidden_states": {0: "2B"},
-            "latent":                {0: "2B", 2: "H", 3: "W"},
+            "sample":                {0: "batch", 2: "H", 3: "W"},
+            "timestep":              {0: "batch"},
+            "encoder_hidden_states": {0: "batch"},
+            "latent":                {0: "batch", 2: "H", 3: "W"},
         },
         opset_version=17,
         do_constant_folding=True,
     )
 print("[ok] exported:", onnx_path)
+print("[ok] ONNX validation passed")
 print("\nNext: copy unet.onnx to engines/onnx/ on the Jetson,")
