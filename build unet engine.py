@@ -6,9 +6,9 @@ Fully decoupled from ONNX export, eliminating OOM caused by overlapping memory p
 
 Usage example:
   python3 build_unet_engine.py \
-      --onnx   /home/nobunali/engines/.../unet.opt.onnx \
-      --engine /home/nobunali/engines/.../unet.engine \
-      --batch 2 --height 384 --width 384 \
+      --onnx   /home/.../unet.opt.onnx \
+      --engine /home/.../unet.engine \
+      --batch 1 --height 512 --width 512 \
       --workspace-mb 512 --opt-level 2
 
 Notes:
