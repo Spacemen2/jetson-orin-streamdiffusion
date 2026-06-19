@@ -25,6 +25,7 @@ import tensorrt as trt
 def build_engine(onnx_path, engine_path, batch, height, width,
                  embed_dim=1024, max_tokens=77,
                  workspace_mb=512, opt_level=2, fp16=True):
+                 
     logger = trt.Logger(trt.Logger.INFO)
     builder = trt.Builder(logger)
     # TRT 10: explicit batch is the default; create_network(0) is sufficient
