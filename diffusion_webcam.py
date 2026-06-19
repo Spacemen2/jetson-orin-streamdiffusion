@@ -12,7 +12,7 @@ from diffusers import StableDiffusionImg2ImgPipeline, AutoencoderTiny
 from streamdiffusion import StreamDiffusion
 from streamdiffusion.image_utils import postprocess_image
 
-ENGINE_PATH = "/home/nobunali/unet.engine"   # pre-built batch=2 TRT engine
+ENGINE_PATH = "/home/nobunali/jetson-realtime-diffusion/unet_512_b1.engine"   # pre-built batch=2 TRT engine
 
 # ─────────────────────────────────────────────────────────────
 # Wraps a TRT engine to replace stream.unet inside StreamDiffusion.
@@ -113,11 +113,11 @@ pipe = StableDiffusionImg2ImgPipeline.from_pretrained(
 
 stream = StreamDiffusion(
     pipe,
-    t_index_list=[30, 34],   # length 2 → UNet batch=2, matches engine; values are tunable
+    t_index_list=[30],   # length 2 → UNet batch=2, matches engine; values are tunable
     torch_dtype=torch.float16,
     cfg_type="none",
-    width=384,
-    height=384,
+    width=512,
+    height=512,
 )
 
 # Switch to TAESD (lightweight VAE) — the full VAE is the current biggest bottleneck (~458ms/frame)
@@ -157,7 +157,7 @@ while True:
 
     torch.cuda.synchronize(); t0 = time.perf_counter()
     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    frame_pil = Image.fromarray(frame_rgb).resize((384, 384))
+    frame_pil = Image.fromarray(frame_rgb).resize((512, 512))
     input_tensor = torch.from_numpy(np.array(frame_pil)).permute(2, 0, 1).unsqueeze(0).float() / 255.0
     input_tensor = input_tensor.to("cuda").half()
     torch.cuda.synchronize(); t1 = time.perf_counter()
@@ -192,9 +192,12 @@ while True:
     output_np = np.array(img)
     output_bgr = cv2.cvtColor(output_np, cv2.COLOR_RGB2BGR)
     canvas = np.zeros((480, 800, 3), dtype=np.uint8)
-    x = (800 - 384) // 2
-    y = (480 - 384) // 2
-    canvas[y:y+384, x:x+384] = output_bgr
+    scale = 480 / 512
+    new_size = int(512 * scale)  # = 480
+    output_bgr = cv2.resize(output_bgr, (new_size, new_size), interpolation=cv2.INTER_CUBIC)
+    x = (800 - new_size) // 2
+    y = (480 - new_size) // 2
+    canvas[y:y+new_size, x:x+new_size] = output_bgr
     output_bgr = canvas
     cv2.putText(output_bgr, f"{fps:4.1f} FPS", (10, 30),
     cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
