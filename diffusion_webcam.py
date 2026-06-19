@@ -12,7 +12,8 @@ from diffusers import StableDiffusionImg2ImgPipeline, AutoencoderTiny
 from streamdiffusion import StreamDiffusion
 from streamdiffusion.image_utils import postprocess_image
 
-ENGINE_PATH = "/home/nobunali/jetson-realtime-diffusion/unet_512_b1.engine"   # pre-built batch=2 TRT engine
+ENGINE_PATH = "/home/nobunali/jetson-realtime-diffusion/unet_512_b1.engine"   # pre-built batch=1 TRT engine
+TAESD_ENGINE_PATH = "/home/nobunali/jetson-realtime-diffusion/taesd_decoder.engine"
 
 # ─────────────────────────────────────────────────────────────
 # Wraps a TRT engine to replace stream.unet inside StreamDiffusion.
@@ -102,6 +103,52 @@ class TRTUNet(torch.nn.Module):
 
         return (outputs["latent"],)
 
+# ─────────────────────────────────────────────────────────────
+# 把 TAESD decoder 的 TRT 引擎包一层，替换 stream.vae.decode。
+# StreamDiffusion 每帧调用 self.vae.decode(latent, return_dict=False)[0]，
+# 所以这个类接住 latent，跑引擎，按原接口返回 (image,)。
+# ─────────────────────────────────────────────────────────────
+class TRTTAESDDecoder(torch.nn.Module):
+    def __init__(self, engine_path, device="cuda"):
+        super().__init__()
+        self.device = torch.device(device)
+
+        with open(engine_path, "rb") as f, trt.Runtime(TRT_LOGGER) as rt:
+            self.engine = rt.deserialize_cuda_engine(f.read())
+        self.context = self.engine.create_execution_context()
+
+        self.input_names, self.output_names = [], []
+        for i in range(self.engine.num_io_tensors):
+            name = self.engine.get_tensor_name(i)
+            if self.engine.get_tensor_mode(name) == trt.TensorIOMode.INPUT:
+                self.input_names.append(name)
+            else:
+                self.output_names.append(name)
+
+    def _torch_dtype(self, name):
+        return TRT_TO_TORCH[self.engine.get_tensor_dtype(name)]
+
+    @torch.no_grad()
+    def decode(self, latent, return_dict=True, **kwargs):
+        t = latent.to(device=self.device,
+                      dtype=self._torch_dtype("latent")).contiguous()
+        self.context.set_input_shape("latent", tuple(t.shape))
+        self.context.set_tensor_address("latent", t.data_ptr())
+
+        out_shape = tuple(self.context.get_tensor_shape("image"))
+        out = torch.empty(out_shape, dtype=self._torch_dtype("image"),
+                          device=self.device)
+        self.context.set_tensor_address("image", out.data_ptr())
+
+        self.context.execute_async_v3(torch.cuda.current_stream().cuda_stream)
+
+        if return_dict:
+            from diffusers.models.autoencoders.vae import DecoderOutput
+            return DecoderOutput(sample=out)
+        return (out,)
+
+    def forward(self, latent):
+        return self.decode(latent, return_dict=False)[0]
 
 # ── Set up StreamDiffusion normally (VAE / text encoder remain in PyTorch) ──
 pipe = StableDiffusionImg2ImgPipeline.from_pretrained(
@@ -113,7 +160,7 @@ pipe = StableDiffusionImg2ImgPipeline.from_pretrained(
 
 stream = StreamDiffusion(
     pipe,
-    t_index_list=[30],   # length 2 → UNet batch=2, matches engine; values are tunable
+    t_index_list=[30],   # length 1 → UNet batch=1, matches engine; values are tunable
     torch_dtype=torch.float16,
     cfg_type="none",
     width=512,
@@ -124,6 +171,8 @@ stream = StreamDiffusion(
 stream.vae = AutoencoderTiny.from_pretrained(
     "madebyollin/taesd"
 ).to(device="cuda", dtype=torch.float16)
+del stream.vae.decoder
+stream.vae.decode = TRTTAESDDecoder(TAESD_ENGINE_PATH, device="cuda").decode
 print("[info] VAE changed to TAESD")
 
 stream.prepare(
@@ -170,6 +219,8 @@ while True:
     prev_latent = output.detach().clone() if output is not None else None
     torch.cuda.synchronize(); t2 = time.perf_counter()
 
+    if output is None:
+        continue
     img = postprocess_image(output, output_type="pil")[0]
     torch.cuda.synchronize(); t3 = time.perf_counter()
 
