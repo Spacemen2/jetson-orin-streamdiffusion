@@ -130,6 +130,13 @@ class TRTTAESDDecoder(torch.nn.Module):
                 self.input_names.append(name)
             else:
                 self.output_names.append(name)
+        self.output_buffers = {}
+        for name in self.output_names:
+            shape = self.engine.get_tensor_shape(name)
+            shape = tuple(d if d > 0 else 1 for d in shape)
+            self.output_buffers[name] = torch.empty(
+                shape, dtype=self._torch_dtype(name), device=self.device
+            )
 
     def _torch_dtype(self, name):
         return TRT_TO_TORCH[self.engine.get_tensor_dtype(name)]
@@ -141,9 +148,7 @@ class TRTTAESDDecoder(torch.nn.Module):
         self.context.set_input_shape("latent", tuple(t.shape))
         self.context.set_tensor_address("latent", t.data_ptr())
 
-        out_shape = tuple(self.context.get_tensor_shape("image"))
-        out = torch.empty(out_shape, dtype=self._torch_dtype("image"),
-                          device=self.device)
+        out = self.output_buffers["image"]
         self.context.set_tensor_address("image", out.data_ptr())
 
         self.context.execute_async_v3(torch.cuda.current_stream().cuda_stream)
