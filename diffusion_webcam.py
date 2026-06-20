@@ -52,6 +52,14 @@ class TRTUNet(torch.nn.Module):
                 self.output_names.append(name)
         self.acc_ms = 0.0   # profiling: accumulated UNet GPU time per frame
 
+        self.output_buffers = {}
+        for name in self.output_names:
+            shape = self.engine.get_tensor_shape(name)
+            shape = tuple(d if d > 0 else 1 for d in shape)
+            self.output_buffers[name] = torch.empty(
+                shape, dtype=self._torch_dtype(name), device=self.device
+            )
+
     def _torch_dtype(self, name):
         return TRT_TO_TORCH[self.engine.get_tensor_dtype(name)]
 
@@ -86,9 +94,7 @@ class TRTUNet(torch.nn.Module):
         # allocate outputs
         outputs = {}
         for name in self.output_names:
-            shape = tuple(self.context.get_tensor_shape(name))
-            o = torch.empty(shape, dtype=self._torch_dtype(name),
-                            device=self.device)
+            o = self.output_buffers[name]
             outputs[name] = o
             self.context.set_tensor_address(name, o.data_ptr())
 
