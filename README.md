@@ -4,6 +4,8 @@ Real-time webcam style transfer on the **NVIDIA Jetson Orin Nano Super**, using 
 
 USB webcam → SD-Turbo (StreamDiffusion) → TensorRT-accelerated UNet & VAE→ styled output
 
+Built on [StreamDiffusion](https://github.com/cumulo-autumn/StreamDiffusion) and [SD-Turbo](https://huggingface.co/stabilityai/sd-turbo). Uses [TAESD](https://github.com/madebyollin/taesd) as a lightweight VAE.
+
 ## Software
 - JetPack 6.2 (L4T 36.4.4), CUDA 12.6, TensorRT 10.3, cuDNN 9.3
 - 7.4GB unified memory + 16GB swap (required for builds)
