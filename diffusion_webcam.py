@@ -5,14 +5,14 @@ import cv2
 import numpy as np
 from PIL import Image
 
-os.environ["HF_HOME"] = "/home/nobunali/hf_cache"
+os.environ["HF_HOME"] = "/your_path/hf_cache"
 
 import tensorrt as trt
 from diffusers import StableDiffusionImg2ImgPipeline, AutoencoderTiny
 from streamdiffusion import StreamDiffusion
 from streamdiffusion.image_utils import postprocess_image
 
-ENGINE_PATH = "/home/nobunali/unet.engine"   # pre-built batch=2 TRT engine
+ENGINE_PATH = "/your_path/unet.engine"   # pre-built batch=2 TRT engine
 
 # ─────────────────────────────────────────────────────────────
 # Wraps a TRT engine to replace stream.unet inside StreamDiffusion.
