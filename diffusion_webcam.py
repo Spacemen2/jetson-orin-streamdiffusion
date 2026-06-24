@@ -203,7 +203,7 @@ cv2.namedWindow("StreamDiffusion", cv2.WINDOW_NORMAL | cv2.WINDOW_GUI_NORMAL)
 cv2.resizeWindow("StreamDiffusion", 800, 480)
 torch.manual_seed(42)
 torch.cuda.manual_seed(42)
-LATENT_ALPHA = 0.2
+LATENT_ALPHA = 0.5
 prev_latent = None
 
 prof = {k: 0.0 for k in ["preprocess", "unet", "vae+sched", "postprocess", "total"]}
@@ -216,17 +216,22 @@ while True:
         break
 
     torch.cuda.synchronize(); t0 = time.perf_counter()
-    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    frame_pil = Image.fromarray(frame_rgb).resize((512, 512))
-    input_tensor = torch.from_numpy(np.array(frame_pil)).permute(2, 0, 1).unsqueeze(0).float() / 255.0
-    input_tensor = input_tensor.to("cuda").half()
+    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB) #BGR -> RGB
+    frame_pil = Image.fromarray(frame_rgb).resize((512, 512)) #scale to 512x512
+    input_tensor = torch.from_numpy(np.array(frame_pil)).permute(2, 0, 1).unsqueeze(0).float() / 255.0 #to tensor, adjust dims, norm(0-1) 
+    input_tensor = input_tensor.to("cuda").half() # to GPU ,half acc
     torch.cuda.synchronize(); t1 = time.perf_counter()
 
     stream.unet.acc_ms = 0.0
+
+#---------to streamdiffusion----------------------------------
+#[1, 3, 512, 512] -> [1, 4, 64, 64]...
     output = stream(input_tensor)
+#-------------------------------------------------------------
+
     #print(type(output), output.shape if hasattr(output, 'shape') else type(output))
     if prev_latent is not None and output is not None:
-        output = LATENT_ALPHA * prev_latent + (1 - LATENT_ALPHA) * output
+        output = LATENT_ALPHA * prev_latent + (1 - LATENT_ALPHA) * output #[1, 3, 512, 512]
     prev_latent = output.detach().clone() if output is not None else None
     torch.cuda.synchronize(); t2 = time.perf_counter()
 

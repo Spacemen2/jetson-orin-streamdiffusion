@@ -15,7 +15,7 @@ Built on [StreamDiffusion](https://github.com/cumulo-autumn/StreamDiffusion) and
 | Stage | FPS | Notes |
 |---|---|---|
 | Naive PyTorch baseline | 0.76 | No TensorRT, full VAE |
-| UNet → TensorRT (384×384, 2-step) | 1.60 | VAE still full-size, becomes new bottleneck |
+| UNet → TensorRT (384×384, 2-step) | 1.60 | VAE still full-size |
 | VAE → TAESD | 4.45 | Stable baseline |
 | 512×512, single-step denoising | 4.16 | Higher resolution, fewer denoising steps |
 | TAESD decoder → TensorRT | **4.9** | Current best |
