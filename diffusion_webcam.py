@@ -12,8 +12,8 @@ from diffusers import StableDiffusionImg2ImgPipeline, AutoencoderTiny
 from streamdiffusion import StreamDiffusion
 from streamdiffusion.image_utils import postprocess_image
 
-ENGINE_PATH = "/home/nobunali/jetson-realtime-diffusion/unet_512_b1.engine"   # pre-built batch=1 TRT engine
-TAESD_ENGINE_PATH = "/home/nobunali/jetson-realtime-diffusion/taesd_decoder.engine"
+ENGINE_PATH = "/home/nobunali/jetson-orin-streamdiffusion/unet_512_b1.engine"   # pre-built batch=1 TRT engine
+TAESD_ENGINE_PATH = "/home/nobunali/jetson-orin-streamdiffusion/taesd_decoder.engine"
 
 # ─────────────────────────────────────────────────────────────
 # Wraps a TRT engine to replace stream.unet inside StreamDiffusion.
@@ -171,7 +171,7 @@ pipe = StableDiffusionImg2ImgPipeline.from_pretrained(
 
 stream = StreamDiffusion(
     pipe,
-    t_index_list=[30],   # length 1 → UNet batch=1, matches engine; values are tunable
+    t_index_list=[25],   # length 1 → UNet batch=1, matches engine; values are tunable
     torch_dtype=torch.float16,
     cfg_type="none",
     width=512,
@@ -187,7 +187,7 @@ stream.vae.decode = TRTTAESDDecoder(TAESD_ENGINE_PATH, device="cuda").decode
 print("[info] VAE changed to TAESD")
 
 stream.prepare(
-    prompt="Showa Japan 1980s Tokyo street, 35mm film photography, Kodachrome, shallow depth of field, natural lighting, photorealistic, shot on Canon AE-1",
+    prompt="vintage 1980s home interior photograph, natural indoor lighting, realistic colors, lived-in room, shot on 35mm film, documentary style, high detail",
     negative_prompt="anime, cartoon, illustration, painting, drawing, artistic, unrealistic, blur, low quality",
     num_inference_steps=50,
 )
