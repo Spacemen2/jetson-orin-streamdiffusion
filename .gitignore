@@ -3,3 +3,5 @@
 __pycache__/
 *.pyc
 hf_cache/
+!engines/unet/.gitkeep
+!engines/vae/.gitkeep
