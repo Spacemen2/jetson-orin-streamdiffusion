@@ -1,19 +1,33 @@
 import time
-import os
+import os, glob
 import torch
 import cv2
 import numpy as np
 from PIL import Image
 
-os.environ["HF_HOME"] = "/home/nobunali/hf_cache"
+if "HF_HOME" not in os.environ:
+    os.environ["HF_HOME"] = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "hf_cache"
+    )
 
 import tensorrt as trt
 from diffusers import StableDiffusionImg2ImgPipeline, AutoencoderTiny
 from streamdiffusion import StreamDiffusion
 from streamdiffusion.image_utils import postprocess_image
 
-ENGINE_PATH = "/home/nobunali/jetson-orin-streamdiffusion/unet_512_b1.engine"   # pre-built batch=1 TRT engine
-TAESD_ENGINE_PATH = "/home/nobunali/jetson-orin-streamdiffusion/taesd_decoder.engine"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+def find_engine(subdir):
+    pattern = os.path.join(BASE_DIR, "engines", subdir, "*.engine")
+    files = glob.glob(pattern)
+    if len(files) == 0:
+        raise FileNotFoundError(f"engines/{subdir}/ No .engine file")
+    if len(files) > 1:
+        raise RuntimeError(f"engines/{subdir}/ only accept one {files}")
+    return files[0]
+
+ENGINE_PATH = find_engine("unet")   # pre-built batch=1 TRT engine
+TAESD_ENGINE_PATH = find_engine("vae")
 
 # ─────────────────────────────────────────────────────────────
 # Wraps a TRT engine to replace stream.unet inside StreamDiffusion.
