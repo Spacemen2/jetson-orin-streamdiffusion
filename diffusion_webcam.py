@@ -185,7 +185,7 @@ pipe = StableDiffusionImg2ImgPipeline.from_pretrained(
 
 stream = StreamDiffusion(
     pipe,
-    t_index_list=[25],   # length 1 → UNet batch=1, matches engine; values are tunable
+    t_index_list=[27],   # length 1 → UNet batch=1, matches engine; values are tunable
     torch_dtype=torch.float16,
     cfg_type="none",
     width=512,
@@ -201,8 +201,8 @@ stream.vae.decode = TRTTAESDDecoder(TAESD_ENGINE_PATH, device="cuda").decode
 print("[info] VAE changed to TAESD")
 
 stream.prepare(
-    prompt="vintage 1980s home interior photograph, natural indoor lighting, realistic colors, lived-in room, shot on 35mm film, documentary style, high detail",
-    negative_prompt="anime, cartoon, illustration, painting, drawing, artistic, unrealistic, blur, low quality",
+    prompt="1990s cyberpunk anime, cel shaded animation, neon glow, cyan and magenta lighting, glowing screens, dim interior, high contrast shadows, holographic light, retro anime aesthetic, moody indoor atmosphere",
+    negative_prompt="deformed, distorted face, extra limbs, 3d render, cgi, photorealistic, ugly, blurry, low quality",
     num_inference_steps=50,
 )
 
@@ -211,30 +211,33 @@ stream.unet = TRTUNet(ENGINE_PATH, stream.unet, device="cuda")
 print("[info] UNet changed to TRT engine")
 
 cap = cv2.VideoCapture(0)
-#cv2.namedWindow("StreamDiffusion", cv2.WINDOW_NORMAL)
-#cv2.setWindowProperty("StreamDiffusion", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
-cv2.namedWindow("StreamDiffusion", cv2.WINDOW_NORMAL | cv2.WINDOW_GUI_NORMAL)
-cv2.resizeWindow("StreamDiffusion", 800, 480)
+cv2.namedWindow("StreamDiffusion", cv2.WINDOW_NORMAL)
+cv2.setWindowProperty("StreamDiffusion", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
 torch.manual_seed(42)
 torch.cuda.manual_seed(42)
 LATENT_ALPHA = 0.5
 prev_latent = None
 
-prof = {k: 0.0 for k in ["preprocess", "unet", "vae+sched", "postprocess", "total"]}
-nframes = 0
+
+prev_time = time.time()
 fps = 0.0
+
+# count 10min
+start_time = time.time()
+AUTO_CLOSE_SECONDS = 80
 
 while True:
     ret, frame = cap.read()
     if not ret:
         break
+    
+    if time.time() - start_time > AUTO_CLOSE_SECONDS:
+        break
 
-    torch.cuda.synchronize(); t0 = time.perf_counter()
     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB) #BGR -> RGB
     frame_pil = Image.fromarray(frame_rgb).resize((512, 512)) #scale to 512x512
     input_tensor = torch.from_numpy(np.array(frame_pil)).permute(2, 0, 1).unsqueeze(0).float() / 255.0 #to tensor, adjust dims, norm(0-1) 
     input_tensor = input_tensor.to("cuda").half() # to GPU ,half acc
-    torch.cuda.synchronize(); t1 = time.perf_counter()
 
     stream.unet.acc_ms = 0.0
 
@@ -247,28 +250,14 @@ while True:
     if prev_latent is not None and output is not None:
         output = LATENT_ALPHA * prev_latent + (1 - LATENT_ALPHA) * output #[1, 3, 512, 512]
     prev_latent = output.detach().clone() if output is not None else None
-    torch.cuda.synchronize(); t2 = time.perf_counter()
 
     if output is None:
         continue
     img = postprocess_image(output, output_type="pil")[0]
-    torch.cuda.synchronize(); t3 = time.perf_counter()
 
-    prof["preprocess"]  += (t1 - t0) * 1000
-    prof["unet"]        += stream.unet.acc_ms
-    prof["vae+sched"]   += (t2 - t1) * 1000 - stream.unet.acc_ms
-    prof["postprocess"] += (t3 - t2) * 1000
-    prof["total"]       += (t3 - t0) * 1000
-    nframes += 1
-
-    if nframes >= 30:
-        a = {k: v / nframes for k, v in prof.items()}
-        fps = 1000.0 / a["total"]
-        print(f"[prof] total {a['total']:.0f}ms | unet {a['unet']:.0f} | "
-              f"vae+sched {a['vae+sched']:.0f} | pre {a['preprocess']:.0f} | "
-              f"post {a['postprocess']:.0f}  ->  {fps:.2f} FPS")
-        prof = {k: 0.0 for k in prof}
-        nframes = 0
+    now = time.time()
+    fps = 1.0 / (now - prev_time)
+    prev_time = now
 
     output_np = np.array(img)
     output_bgr = cv2.cvtColor(output_np, cv2.COLOR_RGB2BGR)
@@ -281,7 +270,7 @@ while True:
     canvas[y:y+new_size, x:x+new_size] = output_bgr
     output_bgr = canvas
     cv2.putText(output_bgr, f"{fps:4.1f} FPS", (10, 30),
-    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
     cv2.imshow("StreamDiffusion", output_bgr)
 
     if cv2.waitKey(1) & 0xFF == ord('q'):
