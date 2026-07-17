@@ -77,6 +77,7 @@ class TRTUNet(torch.nn.Module):
     def _torch_dtype(self, name):
         return TRT_TO_TORCH[self.engine.get_tensor_dtype(name)]
 
+    #TRT fit
     @torch.no_grad()
     def forward(self, sample, timestep, encoder_hidden_states=None,
                 return_dict=False, **kwargs):
@@ -183,6 +184,7 @@ pipe = StableDiffusionImg2ImgPipeline.from_pretrained(
     safety_checker=None,
 ).to("cuda")
 
+#-----------------------------------————---——--——-——---------------------------------------
 stream = StreamDiffusion(
     pipe,
     t_index_list=[27],   # length 1 → UNet batch=1, matches engine; values are tunable
@@ -191,6 +193,7 @@ stream = StreamDiffusion(
     width=512,
     height=512,
 )
+#-----------------------------------————---——--——-——---------------------------------------
 
 # Switch to TAESD (lightweight VAE) — the full VAE is the current biggest bottleneck (~458ms/frame)
 stream.vae = AutoencoderTiny.from_pretrained(
@@ -201,8 +204,8 @@ stream.vae.decode = TRTTAESDDecoder(TAESD_ENGINE_PATH, device="cuda").decode
 print("[info] VAE changed to TAESD")
 
 stream.prepare(
-    prompt="1990s cyberpunk anime, cel shaded animation, neon glow, cyan and magenta lighting, glowing screens, dim interior, high contrast shadows, holographic light, retro anime aesthetic, moody indoor atmosphere",
-    negative_prompt="deformed, distorted face, extra limbs, 3d render, cgi, photorealistic, ugly, blurry, low quality",
+    prompt="surreal dreamscape, ethereal digital art, vibrant neon colors, glowing particles, otherworldly atmosphere, intricate details, fantasy concept art, luminous, iridescent, cinematic lighting, hyperdetailed",
+    negative_prompt="photorealistic, plain, boring, dull colors, low detail, blurry, ugly, deformed, distorted face, extra limbs, watermark, text",
     num_inference_steps=50,
 )
 
@@ -224,7 +227,7 @@ fps = 0.0
 
 # count 10min
 start_time = time.time()
-AUTO_CLOSE_SECONDS = 80
+AUTO_CLOSE_SECONDS = 100000
 
 while True:
     ret, frame = cap.read()
@@ -247,13 +250,13 @@ while True:
 #-------------------------------------------------------------
 
     #print(type(output), output.shape if hasattr(output, 'shape') else type(output))
-    if prev_latent is not None and output is not None:
-        output = LATENT_ALPHA * prev_latent + (1 - LATENT_ALPHA) * output #[1, 3, 512, 512]
-    prev_latent = output.detach().clone() if output is not None else None
+    if prev_frame is not None and output is not None:
+        output = FRAME_ALPHA * prev_frame + (1 - FRAME_ALPHA) * output #[1, 3, 512, 512]
+    prev_frame = output.detach().clone() if output is not None else None
 
     if output is None:
         continue
-    img = postprocess_image(output, output_type="pil")[0]
+    img = postprocess_image(output, output_type="pil")[0]# tensor -> pil image
 
     now = time.time()
     fps = 1.0 / (now - prev_time)
