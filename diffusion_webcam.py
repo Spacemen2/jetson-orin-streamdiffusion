@@ -1,5 +1,7 @@
-import time
 import os, glob
+os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
+import time
 import torch
 import cv2
 import numpy as np
@@ -44,6 +46,7 @@ TRT_TO_TORCH = {
     trt.int64: torch.int64,
 }
 
+_t = time.time()
 
 class TRTUNet(torch.nn.Module):
     def __init__(self, engine_path, ref_unet, device="cuda"):
@@ -183,6 +186,7 @@ pipe = StableDiffusionImg2ImgPipeline.from_pretrained(
     variant="fp16",
     safety_checker=None,
 ).to("cuda")
+print(f"[启动] pipeline加载: {time.time()-_t:.1f}s"); _t = time.time()
 
 #-----------------------------------————---——--——-——---------------------------------------
 stream = StreamDiffusion(
@@ -193,6 +197,7 @@ stream = StreamDiffusion(
     width=512,
     height=512,
 )
+print(f"[启动] StreamDiffusion: {time.time()-_t:.1f}s"); _t = time.time()
 #-----------------------------------————---——--——-——---------------------------------------
 
 # Switch to TAESD (lightweight VAE) — the full VAE is the current biggest bottleneck (~458ms/frame)
@@ -202,24 +207,29 @@ stream.vae = AutoencoderTiny.from_pretrained(
 del stream.vae.decoder
 stream.vae.decode = TRTTAESDDecoder(TAESD_ENGINE_PATH, device="cuda").decode
 print("[info] VAE changed to TAESD")
+print(f"[启动] TAESD加载: {time.time()-_t:.1f}s"); _t = time.time()
 
 stream.prepare(
     prompt="surreal dreamscape, ethereal digital art, vibrant neon colors, glowing particles, otherworldly atmosphere, intricate details, fantasy concept art, luminous, iridescent, cinematic lighting, hyperdetailed",
     negative_prompt="photorealistic, plain, boring, dull colors, low detail, blurry, ugly, deformed, distorted face, extra limbs, watermark, text",
     num_inference_steps=50,
 )
+print(f"[启动] prepare: {time.time()-_t:.1f}s"); _t = time.time()
 
 # ── Replace UNet with the TRT engine (safest to swap after prepare()) ──
 stream.unet = TRTUNet(ENGINE_PATH, stream.unet, device="cuda")
 print("[info] UNet changed to TRT engine")
+print(f"[启动] TRT引擎加载: {time.time()-_t:.1f}s"); _t = time.time()
 
 cap = cv2.VideoCapture(0)
-cv2.namedWindow("StreamDiffusion", cv2.WINDOW_NORMAL)
-cv2.setWindowProperty("StreamDiffusion", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+cv2.namedWindow("StreamDiffusion", cv2.WINDOW_NORMAL | cv2.WINDOW_GUI_NORMAL)
+cv2.resizeWindow("StreamDiffusion", 800, 480)
+#cv2.namedWindow("StreamDiffusion", cv2.WINDOW_NORMAL)
+#cv2.setWindowProperty("StreamDiffusion", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
 torch.manual_seed(42)
 torch.cuda.manual_seed(42)
-LATENT_ALPHA = 0.5
-prev_latent = None
+FRAME_ALPHA = 0.5
+prev_frame = None
 
 
 prev_time = time.time()
