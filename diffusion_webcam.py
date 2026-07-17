@@ -46,7 +46,6 @@ TRT_TO_TORCH = {
     trt.int64: torch.int64,
 }
 
-_t = time.time()
 
 class TRTUNet(torch.nn.Module):
     def __init__(self, engine_path, ref_unet, device="cuda"):
@@ -197,7 +196,6 @@ stream = StreamDiffusion(
     width=512,
     height=512,
 )
-print(f"[启动] StreamDiffusion: {time.time()-_t:.1f}s"); _t = time.time()
 #-----------------------------------————---——--——-——---------------------------------------
 
 # Switch to TAESD (lightweight VAE) — the full VAE is the current biggest bottleneck (~458ms/frame)
@@ -207,19 +205,16 @@ stream.vae = AutoencoderTiny.from_pretrained(
 del stream.vae.decoder
 stream.vae.decode = TRTTAESDDecoder(TAESD_ENGINE_PATH, device="cuda").decode
 print("[info] VAE changed to TAESD")
-print(f"[启动] TAESD加载: {time.time()-_t:.1f}s"); _t = time.time()
 
 stream.prepare(
     prompt="surreal dreamscape, ethereal digital art, vibrant neon colors, glowing particles, otherworldly atmosphere, intricate details, fantasy concept art, luminous, iridescent, cinematic lighting, hyperdetailed",
     negative_prompt="photorealistic, plain, boring, dull colors, low detail, blurry, ugly, deformed, distorted face, extra limbs, watermark, text",
     num_inference_steps=50,
 )
-print(f"[启动] prepare: {time.time()-_t:.1f}s"); _t = time.time()
 
 # ── Replace UNet with the TRT engine (safest to swap after prepare()) ──
 stream.unet = TRTUNet(ENGINE_PATH, stream.unet, device="cuda")
 print("[info] UNet changed to TRT engine")
-print(f"[启动] TRT引擎加载: {time.time()-_t:.1f}s"); _t = time.time()
 
 cap = cv2.VideoCapture(0)
 cv2.namedWindow("StreamDiffusion", cv2.WINDOW_NORMAL | cv2.WINDOW_GUI_NORMAL)
