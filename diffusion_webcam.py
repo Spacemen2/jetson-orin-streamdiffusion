@@ -1,19 +1,35 @@
+import os, glob
+os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
 import time
-import os
 import torch
 import cv2
 import numpy as np
 from PIL import Image
 
-os.environ["HF_HOME"] = "/home/nobunali/hf_cache"
+if "HF_HOME" not in os.environ:
+    os.environ["HF_HOME"] = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "hf_cache"
+    )
 
 import tensorrt as trt
 from diffusers import StableDiffusionImg2ImgPipeline, AutoencoderTiny
 from streamdiffusion import StreamDiffusion
 from streamdiffusion.image_utils import postprocess_image
 
-ENGINE_PATH = "/home/nobunali/jetson-realtime-diffusion/unet_512_b1.engine"   # pre-built batch=1 TRT engine
-TAESD_ENGINE_PATH = "/home/nobunali/jetson-realtime-diffusion/taesd_decoder.engine"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+def find_engine(subdir):
+    pattern = os.path.join(BASE_DIR, "engines", subdir, "*.engine")
+    files = glob.glob(pattern)
+    if len(files) == 0:
+        raise FileNotFoundError(f"engines/{subdir}/ No .engine file")
+    if len(files) > 1:
+        raise RuntimeError(f"engines/{subdir}/ only accept one {files}")
+    return files[0]
+
+ENGINE_PATH = find_engine("unet")   # pre-built batch=1 TRT engine
+TAESD_ENGINE_PATH = find_engine("vae")
 
 # ─────────────────────────────────────────────────────────────
 # Wraps a TRT engine to replace stream.unet inside StreamDiffusion.
@@ -63,6 +79,7 @@ class TRTUNet(torch.nn.Module):
     def _torch_dtype(self, name):
         return TRT_TO_TORCH[self.engine.get_tensor_dtype(name)]
 
+    #TRT fit
     @torch.no_grad()
     def forward(self, sample, timestep, encoder_hidden_states=None,
                 return_dict=False, **kwargs):
@@ -168,15 +185,18 @@ pipe = StableDiffusionImg2ImgPipeline.from_pretrained(
     variant="fp16",
     safety_checker=None,
 ).to("cuda")
+print(f"[启动] pipeline加载: {time.time()-_t:.1f}s"); _t = time.time()
 
+#-----------------------------------————---——--——-——---------------------------------------
 stream = StreamDiffusion(
     pipe,
-    t_index_list=[30],   # length 1 → UNet batch=1, matches engine; values are tunable
+    t_index_list=[27],   # length 1 → UNet batch=1, matches engine; values are tunable
     torch_dtype=torch.float16,
     cfg_type="none",
     width=512,
     height=512,
 )
+#-----------------------------------————---——--——-——---------------------------------------
 
 # Switch to TAESD (lightweight VAE) — the full VAE is the current biggest bottleneck (~458ms/frame)
 stream.vae = AutoencoderTiny.from_pretrained(
@@ -187,8 +207,8 @@ stream.vae.decode = TRTTAESDDecoder(TAESD_ENGINE_PATH, device="cuda").decode
 print("[info] VAE changed to TAESD")
 
 stream.prepare(
-    prompt="Showa Japan 1980s Tokyo street, 35mm film photography, Kodachrome, shallow depth of field, natural lighting, photorealistic, shot on Canon AE-1",
-    negative_prompt="anime, cartoon, illustration, painting, drawing, artistic, unrealistic, blur, low quality",
+    prompt="surreal dreamscape, ethereal digital art, vibrant neon colors, glowing particles, otherworldly atmosphere, intricate details, fantasy concept art, luminous, iridescent, cinematic lighting, hyperdetailed",
+    negative_prompt="photorealistic, plain, boring, dull colors, low detail, blurry, ugly, deformed, distorted face, extra limbs, watermark, text",
     num_inference_steps=50,
 )
 
@@ -197,59 +217,55 @@ stream.unet = TRTUNet(ENGINE_PATH, stream.unet, device="cuda")
 print("[info] UNet changed to TRT engine")
 
 cap = cv2.VideoCapture(0)
-#cv2.namedWindow("StreamDiffusion", cv2.WINDOW_NORMAL)
-#cv2.setWindowProperty("StreamDiffusion", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
 cv2.namedWindow("StreamDiffusion", cv2.WINDOW_NORMAL | cv2.WINDOW_GUI_NORMAL)
 cv2.resizeWindow("StreamDiffusion", 800, 480)
+#cv2.namedWindow("StreamDiffusion", cv2.WINDOW_NORMAL)
+#cv2.setWindowProperty("StreamDiffusion", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
 torch.manual_seed(42)
 torch.cuda.manual_seed(42)
-LATENT_ALPHA = 0.2
-prev_latent = None
+FRAME_ALPHA = 0.5
+prev_frame = None
 
-prof = {k: 0.0 for k in ["preprocess", "unet", "vae+sched", "postprocess", "total"]}
-nframes = 0
+
+prev_time = time.time()
 fps = 0.0
+
+# count 10min
+start_time = time.time()
+AUTO_CLOSE_SECONDS = 100000
 
 while True:
     ret, frame = cap.read()
     if not ret:
         break
+    
+    if time.time() - start_time > AUTO_CLOSE_SECONDS:
+        break
 
-    torch.cuda.synchronize(); t0 = time.perf_counter()
-    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    frame_pil = Image.fromarray(frame_rgb).resize((512, 512))
-    input_tensor = torch.from_numpy(np.array(frame_pil)).permute(2, 0, 1).unsqueeze(0).float() / 255.0
-    input_tensor = input_tensor.to("cuda").half()
-    torch.cuda.synchronize(); t1 = time.perf_counter()
+    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB) #BGR -> RGB
+    frame_pil = Image.fromarray(frame_rgb).resize((512, 512)) #scale to 512x512
+    input_tensor = torch.from_numpy(np.array(frame_pil)).permute(2, 0, 1).unsqueeze(0).float() / 255.0 #to tensor, adjust dims, norm(0-1) 
+    input_tensor = input_tensor.to("cuda").half() # to GPU ,half acc
 
     stream.unet.acc_ms = 0.0
+
+#---------to streamdiffusion----------------------------------
+#[1, 3, 512, 512] -> [1, 4, 64, 64]...
     output = stream(input_tensor)
+#-------------------------------------------------------------
+
     #print(type(output), output.shape if hasattr(output, 'shape') else type(output))
-    if prev_latent is not None and output is not None:
-        output = LATENT_ALPHA * prev_latent + (1 - LATENT_ALPHA) * output
-    prev_latent = output.detach().clone() if output is not None else None
-    torch.cuda.synchronize(); t2 = time.perf_counter()
+    if prev_frame is not None and output is not None:
+        output = FRAME_ALPHA * prev_frame + (1 - FRAME_ALPHA) * output #[1, 3, 512, 512]
+    prev_frame = output.detach().clone() if output is not None else None
 
     if output is None:
         continue
-    img = postprocess_image(output, output_type="pil")[0]
-    torch.cuda.synchronize(); t3 = time.perf_counter()
+    img = postprocess_image(output, output_type="pil")[0]# tensor -> pil image
 
-    prof["preprocess"]  += (t1 - t0) * 1000
-    prof["unet"]        += stream.unet.acc_ms
-    prof["vae+sched"]   += (t2 - t1) * 1000 - stream.unet.acc_ms
-    prof["postprocess"] += (t3 - t2) * 1000
-    prof["total"]       += (t3 - t0) * 1000
-    nframes += 1
-
-    if nframes >= 30:
-        a = {k: v / nframes for k, v in prof.items()}
-        fps = 1000.0 / a["total"]
-        print(f"[prof] total {a['total']:.0f}ms | unet {a['unet']:.0f} | "
-              f"vae+sched {a['vae+sched']:.0f} | pre {a['preprocess']:.0f} | "
-              f"post {a['postprocess']:.0f}  ->  {fps:.2f} FPS")
-        prof = {k: 0.0 for k in prof}
-        nframes = 0
+    now = time.time()
+    fps = 1.0 / (now - prev_time)
+    prev_time = now
 
     output_np = np.array(img)
     output_bgr = cv2.cvtColor(output_np, cv2.COLOR_RGB2BGR)
@@ -262,7 +278,7 @@ while True:
     canvas[y:y+new_size, x:x+new_size] = output_bgr
     output_bgr = canvas
     cv2.putText(output_bgr, f"{fps:4.1f} FPS", (10, 30),
-    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
     cv2.imshow("StreamDiffusion", output_bgr)
 
     if cv2.waitKey(1) & 0xFF == ord('q'):
