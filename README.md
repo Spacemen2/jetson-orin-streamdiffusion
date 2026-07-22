@@ -8,7 +8,7 @@ Built on [StreamDiffusion](https://github.com/cumulo-autumn/StreamDiffusion) and
 
 ## Software
 - JetPack 6.2.1 (L4T 36.4.4), CUDA 12.6, TensorRT 10.7, cuDNN 9.3
-- 7.4GB unified memory + 16GB swap (required for builds)
+- 7.4GB unified memory + 16GB swap 
 
 ## Performance
  

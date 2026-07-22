@@ -185,7 +185,6 @@ pipe = StableDiffusionImg2ImgPipeline.from_pretrained(
     variant="fp16",
     safety_checker=None,
 ).to("cuda")
-print(f"[启动] pipeline加载: {time.time()-_t:.1f}s"); _t = time.time()
 
 #-----------------------------------————---——--——-——---------------------------------------
 stream = StreamDiffusion(
