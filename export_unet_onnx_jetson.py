@@ -7,7 +7,7 @@ from diffusers import UNet2DConditionModel
 
 # ── Config: set OUT_DIR to your local path ──────────────
 MODEL_ID = "stabilityai/sd-turbo"
-OUT_DIR = "onnx_out"      # ← Windows path, use r"..." raw string
+OUT_DIR = "onnx_out"     
 
 SAMPLE_BATCH = 2
 LATENT_H = 64      # 512 // 8

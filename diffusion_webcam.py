@@ -19,6 +19,18 @@ from streamdiffusion.image_utils import postprocess_image
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
+def gstreamer_pipeline(capture_width=1280, capture_height=720,
+                       display_width=512, display_height=512,
+                       framerate=30, flip_method=0):
+    return (
+        f"nvarguscamerasrc wbmode=3 ! "
+        f"video/x-raw(memory:NVMM), width={capture_width}, height={capture_height}, "
+        f"framerate={framerate}/1 ! "
+        f"nvvidconv flip-method={flip_method} ! "
+        f"video/x-raw, width={display_width}, height={display_height}, format=BGRx ! "
+        f"videoconvert ! video/x-raw, format=BGR ! appsink drop=true max-buffers=1"
+    )
+
 def find_engine(subdir):
     pattern = os.path.join(BASE_DIR, "engines", subdir, "*.engine")
     files = glob.glob(pattern)
@@ -127,9 +139,9 @@ class TRTUNet(torch.nn.Module):
         return (outputs["latent"],)
 
 # ─────────────────────────────────────────────────────────────
-# 把 TAESD decoder 的 TRT 引擎包一层，替换 stream.vae.decode。
-# StreamDiffusion 每帧调用 self.vae.decode(latent, return_dict=False)[0]，
-# 所以这个类接住 latent，跑引擎，按原接口返回 (image,)。
+# Wrap the TAESD decoder's TRT engine to replace stream.vae.decode.
+# StreamDiffusion calls self.vae.decode(latent, return_dict=False)[0] every frame,
+# so this class receives the latent, runs the engine, and returns (image,) in the original interface.
 # ─────────────────────────────────────────────────────────────
 class TRTTAESDDecoder(torch.nn.Module):
     def __init__(self, engine_path, device="cuda"):
@@ -189,7 +201,7 @@ pipe = StableDiffusionImg2ImgPipeline.from_pretrained(
 #-----------------------------------————---——--——-——---------------------------------------
 stream = StreamDiffusion(
     pipe,
-    t_index_list=[27],   # length 1 → UNet batch=1, matches engine; values are tunable
+    t_index_list=[30],   # length 1 → UNet batch=1, matches engine; values are tunable
     torch_dtype=torch.float16,
     cfg_type="none",
     width=512,
@@ -206,8 +218,8 @@ stream.vae.decode = TRTTAESDDecoder(TAESD_ENGINE_PATH, device="cuda").decode
 print("[info] VAE changed to TAESD")
 
 stream.prepare(
-    prompt="surreal dreamscape, ethereal digital art, vibrant neon colors, glowing particles, otherworldly atmosphere, intricate details, fantasy concept art, luminous, iridescent, cinematic lighting, hyperdetailed",
-    negative_prompt="photorealistic, plain, boring, dull colors, low detail, blurry, ugly, deformed, distorted face, extra limbs, watermark, text",
+    prompt="1980s Showa era photograph, vintage film aesthetic, warm nostalgic tones, shot on Kodak film, faded colors, retro Japanese atmosphere, natural lighting, grainy, cinematic, documentary style, 35mm film",
+    negative_prompt="anime, cartoon, illustration, painting, 3d render, cgi, modern, vibrant saturated colors, digital, deformed, distorted face, portrait, close-up face, blurry, low quality",
     num_inference_steps=50,
 )
 
@@ -215,7 +227,7 @@ stream.prepare(
 stream.unet = TRTUNet(ENGINE_PATH, stream.unet, device="cuda")
 print("[info] UNet changed to TRT engine")
 
-cap = cv2.VideoCapture(0)
+cap = cv2.VideoCapture(gstreamer_pipeline(), cv2.CAP_GSTREAMER)
 cv2.namedWindow("StreamDiffusion", cv2.WINDOW_NORMAL | cv2.WINDOW_GUI_NORMAL)
 cv2.resizeWindow("StreamDiffusion", 800, 480)
 #cv2.namedWindow("StreamDiffusion", cv2.WINDOW_NORMAL)
