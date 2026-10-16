@@ -7,7 +7,7 @@ from diffusers import UNet2DConditionModel
 
 # ── Config: set OUT_DIR to your local path ──────────────
 MODEL_ID = "stabilityai/sd-turbo"
-OUT_DIR = r"C:\sd_export\onnx"      # ← Windows path, use r"..." raw string
+OUT_DIR = "onnx_out"      # ← Windows path, use r"..." raw string
 
 SAMPLE_BATCH = 2
 LATENT_H = 64      # 512 // 8
@@ -61,6 +61,7 @@ with torch.no_grad():
         },
         opset_version=17,
         do_constant_folding=True,
+        dynamo = False,
     )
     
 # —— Verify the ONNX model after export

@@ -4,7 +4,7 @@ import torch
 from diffusers import AutoencoderTiny
  
 # ── Config ──────────────────────────────────────────────
-OUT_DIR = r"C:\sd_export\onnx"
+OUT_DIR = "onnx_out"
 LATENT_H = 64      # 512 // 8
 LATENT_W = 64      # 512 // 8
 SAMPLE_BATCH = 1   # decoder 每帧处理1张图，跟UNet的batch无关
@@ -49,6 +49,7 @@ with torch.no_grad():
         },
         opset_version=17,
         do_constant_folding=True,
+        dynamo = False,  
     )
 print(f"[ok] exported in {time.perf_counter()-t0:.1f}s:", onnx_path)
  
