@@ -1,0 +1,22 @@
+# Jetson Orin Nano Super — JetPack 7.2.1 (CUDA 13.2 / sm_87)
+# Install into a venv created with --system-site-packages (see setup.sh)
+
+torch @ https://github.com/Shattered217/Jetson-Orin-Wheels/releases/download/7.2.0/torch-2.12.0-cp312-cp312-linux_aarch64.whl
+torchvision @ https://github.com/Shattered217/Jetson-Orin-Wheels/releases/download/7.2.0/torchvision-0.27.0%2B78839c2-cp312-cp312-linux_aarch64.whl
+onnxruntime-gpu @ https://github.com/Shattered217/Jetson-Orin-Wheels/releases/download/7.2.0/onnxruntime_gpu-1.28.0-cp312-cp312-linux_aarch64.whl
+numpy<2
+
+diffusers==0.41.0
+transformers==5.19.0
+accelerate==1.15.0
+safetensors==0.8.0
+huggingface-hub==1.33.0
+tokenizers==0.23.3
+einops==0.8.2
+omegaconf==2.4.0
+pillow==12.3.0
+
+onnx==1.23.2
+onnx-graphsurgeon==0.6.1
+polygraphy==0.53.6
+

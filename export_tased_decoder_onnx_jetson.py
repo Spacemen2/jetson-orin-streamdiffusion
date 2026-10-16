@@ -7,7 +7,7 @@ from diffusers import AutoencoderTiny
 OUT_DIR = "onnx_out"
 LATENT_H = 64      # 512 // 8
 LATENT_W = 64      # 512 // 8
-SAMPLE_BATCH = 1   # decoder 每帧处理1张图，跟UNet的batch无关
+SAMPLE_BATCH = 1   
 # ─────────────────────────────────────────────────────────
  
 os.makedirs(OUT_DIR, exist_ok=True)
@@ -19,7 +19,6 @@ taesd = taesd.to(device=device, dtype=dtype).eval()
  
  
 class TAESDDecoderWrapper(torch.nn.Module):
-    """只暴露 decode，输出纯tensor（不要DecoderOutput包装类）"""
     def __init__(self, taesd):
         super().__init__()
         self.taesd = taesd

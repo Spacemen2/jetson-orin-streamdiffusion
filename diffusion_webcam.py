@@ -1,6 +1,6 @@
 import os, glob
-os.environ["HF_HUB_OFFLINE"] = "1"
-os.environ["TRANSFORMERS_OFFLINE"] = "1"
+#os.environ["HF_HUB_OFFLINE"] = "1"
+#os.environ["TRANSFORMERS_OFFLINE"] = "1"
 import time
 import torch
 import cv2
