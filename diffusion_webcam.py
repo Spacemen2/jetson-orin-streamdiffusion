@@ -4,6 +4,7 @@ import os, glob
 import time
 import torch
 import cv2
+import argparse
 import numpy as np
 from PIL import Image
 
@@ -18,6 +19,17 @@ from streamdiffusion import StreamDiffusion
 from streamdiffusion.image_utils import postprocess_image
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+def parse_index_list(s):
+    return [int(x) for x in s.split(",") if x.strip() != ""]
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--prompt", type=str,
+    default="pencil sketch, black and white, hand drawn lines, detailed, realistic, high quality",
+    help="positive prompt")
+parser.add_argument("--t-index", type=parse_index_list, default=[26],
+    help="t_index_list")
+args = parser.parse_args()
 
 def gstreamer_pipeline(capture_width=1280, capture_height=720,
                        display_width=512, display_height=512,
@@ -201,11 +213,11 @@ pipe = StableDiffusionImg2ImgPipeline.from_pretrained(
 #-----------------------------------————---——--——-——---------------------------------------
 stream = StreamDiffusion(
     pipe,
-    t_index_list=[30],   # length 1 → UNet batch=1, matches engine; values are tunable
-    torch_dtype=torch.float16,
-    cfg_type="none",
-    width=512,
-    height=512,
+    t_index_list = args.t_index,   # length 1 → UNet batch=1, matches engine; values are tunable
+    torch_dtype = torch.float16,
+    cfg_type = "none",
+    width = 512,
+    height = 512,
 )
 #-----------------------------------————---——--——-——---------------------------------------
 
@@ -218,9 +230,8 @@ stream.vae.decode = TRTTAESDDecoder(TAESD_ENGINE_PATH, device="cuda").decode
 print("[info] VAE changed to TAESD")
 
 stream.prepare(
-    prompt="1980s Showa era photograph, vintage film aesthetic, warm nostalgic tones, shot on Kodak film, faded colors, retro Japanese atmosphere, natural lighting, grainy, cinematic, documentary style, 35mm film",
-    negative_prompt="anime, cartoon, illustration, painting, 3d render, cgi, modern, vibrant saturated colors, digital, deformed, distorted face, portrait, close-up face, blurry, low quality",
-    num_inference_steps=50,
+    prompt = args.prompt,
+    num_inference_steps = 50,
 )
 
 # ── Replace UNet with the TRT engine (safest to swap after prepare()) ──
@@ -263,6 +274,9 @@ while True:
 #---------to streamdiffusion----------------------------------
 #[1, 3, 512, 512] -> [1, 4, 64, 64]...
     output = stream(input_tensor)
+
+    if output is None or torch.isnan(output).any():
+        continue
 #-------------------------------------------------------------
 
     #print(type(output), output.shape if hasattr(output, 'shape') else type(output))

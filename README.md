@@ -63,7 +63,8 @@ python build_taesd_engine.py --onnx onnx_out/taesd_decoder.onnx --engine engines
 
 ### 3. Run
 ```bash
-python diffusion_webcam.py
+python diffusion_webcam.py --prompt "ukiyo-e, Japanese woodblock print, flat colors" --t-index 27
+#--t-index: lower = stronger restyle, higher = closer to input
 ```
 Press **q** to quit.
 
