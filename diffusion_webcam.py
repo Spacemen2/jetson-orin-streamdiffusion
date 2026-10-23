@@ -6,7 +6,8 @@ import torch
 import cv2
 import argparse
 import numpy as np
-from PIL import Image
+import threading
+import queue
 
 if "HF_HOME" not in os.environ:
     os.environ["HF_HOME"] = os.path.join(
@@ -246,46 +247,72 @@ cv2.resizeWindow("StreamDiffusion", 800, 480)
 torch.manual_seed(42)
 torch.cuda.manual_seed(42)
 FRAME_ALPHA = 0.5
-prev_frame = None
 
+frame_queue = queue.Queue(maxsize=1)
+result_queue = queue.Queue(maxsize=1)
+stop_event = threading.Event()
 
-prev_time = time.time()
-fps = 0.0
+def capture_loop():
 
-# count 10min
-start_time = time.time()
-AUTO_CLOSE_SECONDS = 100000
-
-while True:
-    ret, frame = cap.read()
-    if not ret:
-        break
+    while not stop_event.is_set():
+        ret, frame = cap.read()
+        if not ret:
+            stop_event.set()
+            break
+        
+        if frame_queue.full():
+            try:
+                frame_queue.get_nowait()  # Discard the oldest frame
+            except queue.Empty:
+                pass
+        frame_queue.put(frame)
     
-    if time.time() - start_time > AUTO_CLOSE_SECONDS:
-        break
+def inference_loop():
+    while not stop_event.is_set():
+        try:
+            frame = frame_queue.get(timeout=0.5)  # Wait for a frame for up to 0.5 second
+        except queue.Empty:
+            continue  # No frame available, continue the loop
 
-    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB) #BGR -> RGB
-    frame_pil = Image.fromarray(frame_rgb).resize((512, 512)) #scale to 512x512
-    input_tensor = torch.from_numpy(np.array(frame_pil)).permute(2, 0, 1).unsqueeze(0).float() / 255.0 #to tensor, adjust dims, norm(0-1) 
-    input_tensor = input_tensor.to("cuda").half() # to GPU ,half acc
+        t = torch.from_numpy(frame).to("cuda", non_blocking=True)
+        t = t[:, :, [2, 1, 0]]
+        input_tensor = t.permute(2, 0, 1).unsqueeze(0).half() / 255.0
+        stream.unet.acc_ms = 0.0
 
-    stream.unet.acc_ms = 0.0
+        #---------to streamdiffusion----------------------------------
+        #[1, 3, 512, 512] -> [1, 4, 64, 64]...1
+        output = stream(input_tensor)
 
-#---------to streamdiffusion----------------------------------
-#[1, 3, 512, 512] -> [1, 4, 64, 64]...
-    output = stream(input_tensor)
+        if output is None or torch.isnan(output).any():
+            continue
+        #-------------------------------------------------------------
+        if result_queue.full():
+            try:
+                result_queue.get_nowait()
+            except queue.Empty:
+                pass
+        result_queue.put(output)
 
-    if output is None or torch.isnan(output).any():
+t_cap = threading.Thread(target=capture_loop, daemon=True)
+t_inf = threading.Thread(target=inference_loop, daemon=True)
+t_cap.start()
+t_inf.start()
+
+
+prev_frame = None
+prev_time = time.time()
+
+while not stop_event.is_set():
+    try:
+        output = result_queue.get(timeout=0.5)
+    except queue.Empty:
         continue
-#-------------------------------------------------------------
 
     #print(type(output), output.shape if hasattr(output, 'shape') else type(output))
-    if prev_frame is not None and output is not None:
+    if prev_frame is not None:
         output = FRAME_ALPHA * prev_frame + (1 - FRAME_ALPHA) * output #[1, 3, 512, 512]
-    prev_frame = output.detach().clone() if output is not None else None
+    prev_frame = output.detach().clone() 
 
-    if output is None:
-        continue
     img = postprocess_image(output, output_type="pil")[0]# tensor -> pil image
 
     now = time.time()
@@ -295,8 +322,8 @@ while True:
     output_np = np.array(img)
     output_bgr = cv2.cvtColor(output_np, cv2.COLOR_RGB2BGR)
     canvas = np.zeros((480, 800, 3), dtype=np.uint8)
-    scale = 480 / 512
-    new_size = int(512 * scale)  # = 480
+    #scale = 480 / 512
+    new_size = 480  # = 480
     output_bgr = cv2.resize(output_bgr, (new_size, new_size), interpolation=cv2.INTER_CUBIC)
     x = (800 - new_size) // 2
     y = (480 - new_size) // 2
@@ -307,7 +334,11 @@ while True:
     cv2.imshow("StreamDiffusion", output_bgr)
 
     if cv2.waitKey(1) & 0xFF == ord('q'):
+        stop_event.set()
         break
 
+stop_event.set()
+t_cap.join(timeout=1.0)
+t_inf.join(timeout=1.0)
 cap.release()
 cv2.destroyAllWindows()
